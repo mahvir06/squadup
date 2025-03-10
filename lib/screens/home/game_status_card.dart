@@ -5,6 +5,8 @@ import '../../constants/app_theme.dart';
 import '../../models/game_model.dart';
 import '../../models/game_status_model.dart';
 import '../../providers/game_status_provider.dart';
+import '../../models/group_model.dart';
+import '../../providers/group_provider.dart';
 
 class GameStatusCard extends StatefulWidget {
   final GameModel game;
@@ -23,25 +25,17 @@ class GameStatusCard extends StatefulWidget {
 class _GameStatusCardState extends State<GameStatusCard> {
   bool _isLoading = false;
   GameStatusModel? _status;
-  bool _isDown = false;
-  DateTime? _availableUntil;
-  String? _note;
-  late TextEditingController _noteController;
+  List<String> _downForGroups = [];
   
   @override
   void initState() {
     super.initState();
-    _noteController = TextEditingController();
     _loadStatus();
   }
   
-  @override
-  void dispose() {
-    _noteController.dispose();
-    super.dispose();
-  }
-  
   Future<void> _loadStatus() async {
+    if (!mounted) return;
+    
     setState(() {
       _isLoading = true;
     });
@@ -50,219 +44,213 @@ class _GameStatusCardState extends State<GameStatusCard> {
       final gameStatusProvider = Provider.of<GameStatusProvider>(context, listen: false);
       _status = await gameStatusProvider.getGameStatus(widget.userId, widget.game.id);
       
-      if (_status != null) {
+      if (_status != null && mounted) {
         setState(() {
-          _isDown = _status!.isDown;
-          _availableUntil = _status!.availableUntil;
-          _note = _status!.note;
-          _noteController.text = _status!.note ?? '';
+          _downForGroups = List.from(_status!.downForGroups);
         });
       }
     } catch (e) {
-      // Handle error
-    } finally {
-      setState(() {
-        _isLoading = false;
-      });
-    }
-  }
-  
-  Future<void> _toggleStatus() async {
-    setState(() {
-      _isLoading = true;
-    });
-    
-    try {
-      final gameStatusProvider = Provider.of<GameStatusProvider>(context, listen: false);
-      
-      final success = await gameStatusProvider.setGameStatus(
-        userId: widget.userId,
-        gameId: widget.game.id,
-        isDown: !_isDown,
-        availableUntil: _availableUntil,
-        note: _note,
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('An error occurred: ${e.toString()}'),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
       );
-      
-      if (success) {
+    } finally {
+      if (mounted) {
         setState(() {
-          _isDown = !_isDown;
+          _isLoading = false;
         });
       }
-    } catch (e) {
-      // Handle error
-    } finally {
-      setState(() {
-        _isLoading = false;
-      });
     }
   }
   
-  void _showStatusOptions() {
+  void _showGroupOptions() {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (context) => _buildStatusOptionsSheet(),
-    );
-  }
-  
-  Widget _buildStatusOptionsSheet() {
-    return Padding(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
-        left: 16,
-        right: 16,
-        top: 16,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            'Set Status for ${widget.game.name}',
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+            left: 16,
+            right: 16,
+            top: 16,
           ),
-          const SizedBox(height: 16),
-          
-          // Status toggle
-          SwitchListTile(
-            title: const Text('Down to Play'),
-            value: _isDown,
-            onChanged: (value) {
-              setState(() {
-                _isDown = value;
-              });
-            },
-          ),
-          
-          // Available until
-          ListTile(
-            title: const Text('Available Until'),
-            subtitle: _availableUntil != null
-                ? Text(_formatDateTime(_availableUntil!))
-                : const Text('Not set'),
-            trailing: const Icon(Icons.access_time),
-            onTap: () => _selectAvailableUntil(),
-          ),
-          
-          // Note
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: TextField(
-              controller: _noteController,
-              decoration: const InputDecoration(
-                labelText: 'Note (optional)',
-                hintText: 'e.g., "Looking for a squad"',
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Play ${widget.game.name} with...',
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
-              onChanged: (value) {
-                setState(() {
-                  _note = value.isEmpty ? null : value;
-                });
-              },
-            ),
+              const SizedBox(height: 24),
+              
+              FutureBuilder(
+                future: Provider.of<GroupProvider>(context, listen: false).getUserGroups(),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  
+                  if (!snapshot.hasData || (snapshot.data as List).isEmpty) {
+                    return const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(16.0),
+                        child: Text('You haven\'t joined any groups yet'),
+                      ),
+                    );
+                  }
+                  
+                  print('Game ID: ${widget.game.id}');
+                  print('All groups: ${(snapshot.data as List<GroupModel>).map((g) => '${g.name}: ${g.enabledGames}').join(', ')}');
+                  
+                  final groups = (snapshot.data as List<GroupModel>)
+                    .where((group) => group.enabledGames.contains(widget.game.id))
+                    .toList();
+                    
+                  print('Filtered groups: ${groups.map((g) => g.name).join(', ')}');
+                    
+                  if (groups.isEmpty) {
+                    return const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(16.0),
+                        child: Text('None of your groups play this game'),
+                      ),
+                    );
+                  }
+                  
+                  return ListView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: groups.length,
+                    itemBuilder: (context, index) {
+                      final group = groups[index];
+                      final isDown = _downForGroups.contains(group.id);
+                      
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 16),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.05),
+                              blurRadius: 10,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: () async {
+                              List<String> newDownForGroups = List.from(_downForGroups);
+                              if (isDown) {
+                                newDownForGroups.remove(group.id);
+                              } else {
+                                newDownForGroups.add(group.id);
+                              }
+                              
+                              final gameStatusProvider = Provider.of<GameStatusProvider>(context, listen: false);
+                              final success = await gameStatusProvider.setGameStatus(
+                                userId: widget.userId,
+                                gameId: widget.game.id,
+                                isDown: newDownForGroups.isNotEmpty,
+                                downForGroups: newDownForGroups,
+                              );
+                              
+                              if (success && mounted) {
+                                setState(() {
+                                  _downForGroups = newDownForGroups;
+                                });
+                                
+                                // Only update modal state if the bottom sheet is still showing
+                                if (Navigator.of(context).canPop()) {
+                                  setModalState(() {});
+                                }
+                                
+                                // Notify listeners to update other screens
+                                gameStatusProvider.notifyListeners();
+                              }
+                            },
+                            borderRadius: BorderRadius.circular(12),
+                            child: Padding(
+                              padding: const EdgeInsets.all(16.0),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          group.name,
+                                          style: const TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                        if (group.description.isNotEmpty) ...[
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            group.description,
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                  Container(
+                                    width: 24,
+                                    height: 24,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: isDown
+                                          ? Theme.of(context).colorScheme.primary
+                                          : Colors.grey.withOpacity(0.3),
+                                    ),
+                                    child: Icon(
+                                      Icons.check,
+                                      size: 16,
+                                      color: isDown ? Colors.white : Colors.transparent,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+              const SizedBox(height: 16),
+            ],
           ),
-          
-          const SizedBox(height: 16),
-          
-          // Save button
-          ElevatedButton(
-            onPressed: () {
-              _saveStatus();
-              Navigator.pop(context);
-            },
-            child: const Text('Save Status'),
-          ),
-          const SizedBox(height: 16),
-        ],
+        ),
       ),
     );
-  }
-  
-  Future<void> _selectAvailableUntil() async {
-    final now = DateTime.now();
-    final initialTime = _availableUntil ?? now.add(const Duration(hours: 2));
-    
-    final selectedDate = await showDatePicker(
-      context: context,
-      initialDate: initialTime,
-      firstDate: now,
-      lastDate: now.add(const Duration(days: 7)),
-    );
-    
-    if (selectedDate != null) {
-      final selectedTime = await showTimePicker(
-        context: context,
-        initialTime: TimeOfDay.fromDateTime(initialTime),
-      );
-      
-      if (selectedTime != null && mounted) {
-        setState(() {
-          _availableUntil = DateTime(
-            selectedDate.year,
-            selectedDate.month,
-            selectedDate.day,
-            selectedTime.hour,
-            selectedTime.minute,
-          );
-        });
-      }
-    }
-  }
-  
-  Future<void> _saveStatus() async {
-    setState(() {
-      _isLoading = true;
-    });
-    
-    try {
-      final gameStatusProvider = Provider.of<GameStatusProvider>(context, listen: false);
-      
-      await gameStatusProvider.setGameStatus(
-        userId: widget.userId,
-        gameId: widget.game.id,
-        isDown: _isDown,
-        availableUntil: _availableUntil,
-        note: _noteController.text.isEmpty ? null : _noteController.text,
-      );
-    } catch (e) {
-      // Handle error
-    } finally {
-      setState(() {
-        _isLoading = false;
-      });
-    }
-  }
-  
-  String _formatDateTime(DateTime dateTime) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final tomorrow = today.add(const Duration(days: 1));
-    final date = DateTime(dateTime.year, dateTime.month, dateTime.day);
-    
-    String prefix;
-    if (date == today) {
-      prefix = 'Today';
-    } else if (date == tomorrow) {
-      prefix = 'Tomorrow';
-    } else {
-      prefix = '${dateTime.month}/${dateTime.day}';
-    }
-    
-    final hour = dateTime.hour > 12 ? dateTime.hour - 12 : dateTime.hour;
-    final period = dateTime.hour >= 12 ? 'PM' : 'AM';
-    final minute = dateTime.minute.toString().padLeft(2, '0');
-    
-    return '$prefix at $hour:$minute $period';
   }
   
   @override
   Widget build(BuildContext context) {
+    final bool isDown = _downForGroups.isNotEmpty;
+    
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       child: InkWell(
-        onTap: _showStatusOptions,
+        onTap: _showGroupOptions,
         child: Padding(
           padding: const EdgeInsets.all(16.0),
           child: Row(
@@ -311,15 +299,29 @@ class _GameStatusCardState extends State<GameStatusCard> {
                         color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
                       ),
                     ),
-                    if (_note != null && _note!.isNotEmpty) ...[
+                    if (_downForGroups.isNotEmpty) ...[
                       const SizedBox(height: 4),
-                      Text(
-                        _note!,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontStyle: FontStyle.italic,
-                          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
-                        ),
+                      FutureBuilder(
+                        future: Provider.of<GroupProvider>(context, listen: false).getUserGroups(),
+                        builder: (context, snapshot) {
+                          if (!snapshot.hasData) return const SizedBox();
+                          
+                          final groups = (snapshot.data as List<GroupModel>)
+                            .where((group) => _downForGroups.contains(group.id))
+                            .map((group) => group.name)
+                            .join(', ');
+                            
+                          return Text(
+                            'Down to play with: $groups',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontStyle: FontStyle.italic,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          );
+                        },
                       ),
                     ],
                   ],
@@ -335,10 +337,20 @@ class _GameStatusCardState extends State<GameStatusCard> {
                         strokeWidth: 2,
                       ),
                     )
-                  : Switch(
-                      value: _isDown,
-                      onChanged: (_) => _toggleStatus(),
-                      activeColor: AppTheme.downToPlayColor,
+                  : Container(
+                      width: 24,
+                      height: 24,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: isDown
+                            ? Theme.of(context).colorScheme.primary
+                            : Colors.grey.withOpacity(0.3),
+                      ),
+                      child: Icon(
+                        Icons.check,
+                        size: 16,
+                        color: isDown ? Colors.white : Colors.transparent,
+                      ),
                     ),
             ],
           ),

@@ -36,7 +36,12 @@ class _SearchGroupsScreenState extends State<SearchGroupsScreen> {
       final groupProvider = Provider.of<GroupProvider>(context, listen: false);
       await groupProvider.searchGroups(query);
     } catch (e) {
-      // Handle error
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('An error occurred: \\${e.toString()}'),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
     } finally {
       setState(() {
         _isSearching = false;

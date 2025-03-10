@@ -101,7 +101,7 @@ class GroupCard extends StatelessWidget {
                   _buildInfoItem(
                     context,
                     Icons.sports_esports,
-                    '${group.supportedGames.length} games',
+                    '${group.enabledGames.length} games',
                   ),
                   
                   // Public/Private status

@@ -15,6 +15,9 @@ class GameStatusProvider extends ChangeNotifier {
   bool _isLoading = false;
   String? _error;
   
+  // Mock data storage
+  static final Map<String, Map<String, GameStatusModel>> _mockStatusStorage = {};
+  
   // Getters
   List<GameModel> get allGames => _allGames;
   List<GameStatusModel> get userGameStatuses => _userGameStatuses;
@@ -138,7 +141,16 @@ class GameStatusProvider extends ChangeNotifier {
           .get();
       
       _userGameStatuses = querySnapshot.docs
-          .map((doc) => GameStatusModel.fromMap(doc.data() as Map<String, dynamic>, doc.id))
+          .map((doc) {
+            final data = doc.data();
+            if (data == null) return null;
+            return GameStatusModel.fromMap({
+              ...data,
+              'id': doc.id,
+            });
+          })
+          .where((status) => status != null)
+          .cast<GameStatusModel>()
           .toList();
     } catch (e) {
       _error = e.toString();
@@ -151,19 +163,8 @@ class GameStatusProvider extends ChangeNotifier {
   // Get a specific game status
   Future<GameStatusModel?> getGameStatus(String userId, String gameId) async {
     if (FirebaseService.isMockMode) {
-      // In mock mode, check if we have a status for this game
-      final existingStatus = _userGameStatuses.firstWhere(
-        (status) => status.userId == userId && status.gameId == gameId,
-        orElse: () => GameStatusModel(
-          id: 'mock-status-${DateTime.now().millisecondsSinceEpoch}',
-          userId: userId,
-          gameId: gameId,
-          isDown: false,
-          createdAt: DateTime.now(),
-          updatedAt: DateTime.now(),
-        ),
-      );
-      return existingStatus;
+      await Future.delayed(const Duration(milliseconds: 500)); // Simulate network delay
+      return _mockStatusStorage[userId]?[gameId];
     }
     
     try {
@@ -178,10 +179,13 @@ class GameStatusProvider extends ChangeNotifier {
         return null;
       }
       
-      return GameStatusModel.fromMap(
-        querySnapshot.docs.first.data() as Map<String, dynamic>,
-        querySnapshot.docs.first.id,
-      );
+      final data = querySnapshot.docs.first.data() as Map<String, dynamic>;
+      if (data == null) return null;
+      
+      return GameStatusModel.fromMap({
+        ...Map<String, dynamic>.from(data),
+        'id': querySnapshot.docs.first.id,
+      });
     } catch (e) {
       _error = e.toString();
       debugPrint('Error getting game status: $_error');
@@ -194,6 +198,7 @@ class GameStatusProvider extends ChangeNotifier {
     required String userId,
     required String gameId,
     required bool isDown,
+    required List<String> downForGroups,
     DateTime? availableUntil,
     String? note,
   }) async {
@@ -201,80 +206,67 @@ class GameStatusProvider extends ChangeNotifier {
     _error = null;
     
     if (FirebaseService.isMockMode) {
-      // In mock mode, update the local status
-      await Future.delayed(const Duration(seconds: 1)); // Simulate network delay
+      await Future.delayed(const Duration(milliseconds: 500)); // Simulate network delay
       
-      // Find existing status or create a new one
+      // Initialize user's status map if it doesn't exist
+      _mockStatusStorage[userId] ??= {};
+      
+      // Create or update the status
+      final status = GameStatusModel(
+        id: 'mock-status-$userId-$gameId',
+        userId: userId,
+        gameId: gameId,
+        isDown: isDown,
+        downForGroups: List.from(downForGroups), // Create a copy to prevent reference issues
+        availableUntil: availableUntil,
+        note: note,
+        createdAt: _mockStatusStorage[userId]?[gameId]?.createdAt ?? DateTime.now(),
+        updatedAt: DateTime.now(),
+      );
+      
+      // Store the status
+      _mockStatusStorage[userId]![gameId] = status;
+      
+      // Update the local list if this user's statuses are loaded
       final existingIndex = _userGameStatuses.indexWhere(
-        (status) => status.userId == userId && status.gameId == gameId,
+        (s) => s.userId == userId && s.gameId == gameId,
       );
       
       if (existingIndex >= 0) {
-        // Update existing status
-        _userGameStatuses[existingIndex] = GameStatusModel(
-          id: _userGameStatuses[existingIndex].id,
-          userId: userId,
-          gameId: gameId,
-          isDown: isDown,
-          availableUntil: availableUntil,
-          note: note,
-          createdAt: _userGameStatuses[existingIndex].createdAt,
-          updatedAt: DateTime.now(),
-        );
+        _userGameStatuses[existingIndex] = status;
       } else {
-        // Create new status
-        _userGameStatuses.add(GameStatusModel(
-          id: 'mock-status-${DateTime.now().millisecondsSinceEpoch}',
-          userId: userId,
-          gameId: gameId,
-          isDown: isDown,
-          availableUntil: availableUntil,
-          note: note,
-          createdAt: DateTime.now(),
-          updatedAt: DateTime.now(),
-        ));
+        _userGameStatuses.add(status);
       }
       
       _setLoading(false);
+      notifyListeners();
       return true;
     }
     
     try {
-      // Check if status already exists
-      final existingStatus = await getGameStatus(userId, gameId);
-      
-      if (existingStatus != null) {
-        // Update existing status
-        await _getFirestore()
-            .collection(AppConstants.gameStatusCollection)
-            .doc(existingStatus.id)
-            .update({
-          'isDown': isDown,
-          'availableUntil': availableUntil?.toIso8601String(),
-          'note': note,
-          'updatedAt': DateTime.now().toIso8601String(),
-        });
+      final docRef = _getFirestore()
+          .collection(AppConstants.gameStatusCollection)
+          .doc('${userId}_${gameId}');
+
+      final data = {
+        'userId': userId,
+        'gameId': gameId,
+        'isDown': isDown,
+        'downForGroups': downForGroups,
+        'availableUntil': availableUntil?.toIso8601String(),
+        'note': note,
+        'updatedAt': DateTime.now().toIso8601String(),
+      };
+
+      final doc = await docRef.get();
+      if (doc.exists) {
+        await docRef.update(data);
       } else {
-        // Create new status
-        final status = GameStatusModel(
-          id: '',
-          userId: userId,
-          gameId: gameId,
-          isDown: isDown,
-          availableUntil: availableUntil,
-          note: note,
-          createdAt: DateTime.now(),
-          updatedAt: DateTime.now(),
-        );
-        
-        await _getFirestore()
-            .collection(AppConstants.gameStatusCollection)
-            .add(status.toMap());
+        data['createdAt'] = DateTime.now().toIso8601String();
+        await docRef.set(data);
       }
-      
-      // Refresh user game statuses
-      await loadUserGameStatuses(userId);
-      
+
+      notifyListeners();
       return true;
     } catch (e) {
       _error = e.toString();
@@ -351,5 +343,54 @@ class GameStatusProvider extends ChangeNotifier {
   void _setLoading(bool value) {
     _isLoading = value;
     notifyListeners();
+  }
+
+  Future<List<GameStatusModel>> getGroupGameStatuses(String groupId) async {
+    try {
+      final querySnapshot = await _getFirestore()
+          .collection(AppConstants.gameStatusCollection)
+          .where('downForGroups', arrayContains: groupId)
+          .where('isDown', isEqualTo: true)
+          .get();
+
+      return querySnapshot.docs
+          .map((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            return GameStatusModel.fromMap({
+              ...Map<String, dynamic>.from(data),
+              'id': doc.id,
+            });
+          })
+          .where((status) => status != null)
+          .cast<GameStatusModel>()
+          .toList();
+    } catch (e) {
+      print('Error getting group game statuses: $e');
+      return [];
+    }
+  }
+
+  Future<List<GameStatusModel>> getUserGameStatuses(String userId) async {
+    try {
+      final querySnapshot = await _getFirestore()
+          .collection(AppConstants.gameStatusCollection)
+          .where('userId', isEqualTo: userId)
+          .get();
+
+      return querySnapshot.docs
+          .map((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            return GameStatusModel.fromMap({
+              ...Map<String, dynamic>.from(data),
+              'id': doc.id,
+            });
+          })
+          .where((status) => status != null)
+          .cast<GameStatusModel>()
+          .toList();
+    } catch (e) {
+      print('Error getting user game statuses: $e');
+      return [];
+    }
   }
 } 

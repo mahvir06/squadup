@@ -3,8 +3,12 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/group_model.dart';
 import '../constants/app_constants.dart';
 import '../services/firebase_service.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../models/user_model.dart';
+import '../services/group_service.dart';
 
 class GroupProvider extends ChangeNotifier {
+  final GroupService _groupService = GroupService();
   FirebaseFirestore? _firestore;
   
   List<GroupModel> _userGroups = [];
@@ -14,7 +18,32 @@ class GroupProvider extends ChangeNotifier {
   String? _error;
   
   // Mock data for testing
-  final List<GroupModel> _mockGroups = [];
+  final List<GroupModel> _mockGroups = [
+    GroupModel(
+      id: 'group-1',
+      name: 'Casual Gamers',
+      description: 'A group for casual gaming sessions',
+      createdBy: 'mock-user-id',
+      members: ['mock-user-id', 'user-alice', 'user-bob', 'user-charlie'],
+      admins: ['mock-user-id'],
+      enabledGames: ['valorant', 'minecraft', 'league_of_legends', 'apex_legends'],
+      isPublic: true,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    ),
+    GroupModel(
+      id: 'group-2',
+      name: 'Competitive Squad',
+      description: 'For serious gamers only',
+      createdBy: 'user-alice',
+      members: ['mock-user-id', 'user-alice', 'user-diana', 'user-evan'],
+      admins: ['user-alice', 'mock-user-id'],
+      enabledGames: ['league_of_legends', 'valorant', 'apex_legends'],
+      isPublic: false,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    ),
+  ];
   
   // Getters
   List<GroupModel> get userGroups => _userGroups;
@@ -37,53 +66,8 @@ class GroupProvider extends ChangeNotifier {
     _setLoading(true);
     _error = null;
     
-    if (FirebaseService.isMockMode) {
-      // In mock mode, return mock groups
-      await Future.delayed(const Duration(seconds: 1)); // Simulate network delay
-      
-      // Create some mock groups if none exist
-      if (_mockGroups.isEmpty) {
-        _mockGroups.addAll([
-          GroupModel(
-            id: 'mock-group-1',
-            name: 'Casual Gamers',
-            description: 'A group for casual gaming sessions',
-            admins: [userId],
-            members: [userId],
-            supportedGames: ['valorant', 'minecraft'],
-            isPublic: true,
-            createdAt: DateTime.now().subtract(const Duration(days: 30)),
-            updatedAt: DateTime.now().subtract(const Duration(days: 5)),
-          ),
-          GroupModel(
-            id: 'mock-group-2',
-            name: 'Competitive Squad',
-            description: 'Serious players only',
-            admins: ['other-user-id'],
-            members: ['other-user-id', userId],
-            supportedGames: ['league_of_legends', 'valorant'],
-            isPublic: false,
-            createdAt: DateTime.now().subtract(const Duration(days: 60)),
-            updatedAt: DateTime.now().subtract(const Duration(days: 2)),
-          ),
-        ]);
-      }
-      
-      // Filter groups where user is a member
-      _userGroups = _mockGroups.where((group) => group.members.contains(userId)).toList();
-      _setLoading(false);
-      return;
-    }
-    
     try {
-      final querySnapshot = await _getFirestore()
-          .collection(AppConstants.groupsCollection)
-          .where('members', arrayContains: userId)
-          .get();
-      
-      _userGroups = querySnapshot.docs
-          .map((doc) => GroupModel.fromMap(doc.data() as Map<String, dynamic>, doc.id))
-          .toList();
+      _userGroups = await _groupService.getUserGroups(userId);
     } catch (e) {
       _error = e.toString();
       debugPrint('Error loading user groups: $_error');
@@ -93,53 +77,25 @@ class GroupProvider extends ChangeNotifier {
   }
   
   // Get a specific group
-  Future<GroupModel?> getGroup(String groupId) async {
+  Future<void> getGroup(String groupId) async {
     _setLoading(true);
     _error = null;
     
-    if (FirebaseService.isMockMode) {
-      // In mock mode, find the group in mock data
-      await Future.delayed(const Duration(milliseconds: 500)); // Simulate network delay
-      
-      final group = _mockGroups.firstWhere(
-        (group) => group.id == groupId,
-        orElse: () => GroupModel(
-          id: groupId,
-          name: 'Unknown Group',
-          description: 'This group does not exist',
-          admins: [],
-          members: [],
-          supportedGames: [],
-          isPublic: false,
-          createdAt: DateTime.now(),
-          updatedAt: DateTime.now(),
-        ),
-      );
-      
-      _currentGroup = group;
-      _setLoading(false);
-      return group;
-    }
-    
     try {
-      final docSnapshot = await _getFirestore()
-          .collection(AppConstants.groupsCollection)
-          .doc(groupId)
-          .get();
-      
-      if (docSnapshot.exists) {
-        _currentGroup = GroupModel.fromMap(
-          docSnapshot.data() as Map<String, dynamic>,
-          docSnapshot.id,
+      if (FirebaseService.isMockMode) {
+        final group = _mockGroups.firstWhere(
+          (g) => g.id == groupId,
+          orElse: () => throw Exception('Group not found'),
         );
-        return _currentGroup;
+        _currentGroup = group;
+      } else {
+        _currentGroup = await _groupService.getGroup(groupId);
       }
-      
-      return null;
+      notifyListeners();
     } catch (e) {
       _error = e.toString();
       debugPrint('Error getting group: $_error');
-      return null;
+      _currentGroup = null;
     } finally {
       _setLoading(false);
     }
@@ -150,8 +106,9 @@ class GroupProvider extends ChangeNotifier {
     required String name,
     required String description,
     required String adminId,
-    required List<String> supportedGames,
+    required List<String> enabledGames,
     required bool isPublic,
+    String? imageUrl,
   }) async {
     _setLoading(true);
     _error = null;
@@ -164,12 +121,14 @@ class GroupProvider extends ChangeNotifier {
         id: 'mock-group-${_mockGroups.length + 1}',
         name: name,
         description: description,
-        admins: [adminId],
+        createdBy: adminId,
         members: [adminId],
-        supportedGames: supportedGames,
+        admins: [adminId],
+        enabledGames: enabledGames,
         isPublic: isPublic,
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
+        imageUrl: imageUrl,
       );
       
       _mockGroups.add(newGroup);
@@ -180,25 +139,17 @@ class GroupProvider extends ChangeNotifier {
     }
     
     try {
-      final group = GroupModel(
-        id: '',
+      final group = await _groupService.createGroup(
         name: name,
         description: description,
-        admins: [adminId],
-        members: [adminId],
-        supportedGames: supportedGames,
+        createdBy: adminId,
+        supportedGames: enabledGames,
         isPublic: isPublic,
-        createdAt: DateTime.now(),
-        updatedAt: DateTime.now(),
+        imageUrl: imageUrl,
       );
       
-      await _getFirestore()
-          .collection(AppConstants.groupsCollection)
-          .add(group.toMap());
-      
-      // Refresh user groups
-      await loadUserGroups(adminId);
-      
+      _userGroups.add(group);
+      notifyListeners();
       return true;
     } catch (e) {
       _error = e.toString();
@@ -212,10 +163,11 @@ class GroupProvider extends ChangeNotifier {
   // Update a group
   Future<bool> updateGroup({
     required String groupId,
-    required String name,
-    required String description,
-    required List<String> supportedGames,
-    required bool isPublic,
+    String? name,
+    String? description,
+    List<String>? enabledGames,
+    bool? isPublic,
+    String? imageUrl,
   }) async {
     _setLoading(true);
     _error = null;
@@ -228,14 +180,16 @@ class GroupProvider extends ChangeNotifier {
       if (index >= 0) {
         final updatedGroup = GroupModel(
           id: groupId,
-          name: name,
-          description: description,
-          admins: _mockGroups[index].admins,
+          name: name ?? _mockGroups[index].name,
+          description: description ?? _mockGroups[index].description,
+          createdBy: _mockGroups[index].createdBy,
           members: _mockGroups[index].members,
-          supportedGames: supportedGames,
-          isPublic: isPublic,
+          admins: _mockGroups[index].admins,
+          enabledGames: enabledGames ?? _mockGroups[index].enabledGames,
+          isPublic: isPublic ?? _mockGroups[index].isPublic,
           createdAt: _mockGroups[index].createdAt,
           updatedAt: DateTime.now(),
+          imageUrl: imageUrl ?? _mockGroups[index].imageUrl,
         );
         
         _mockGroups[index] = updatedGroup;
@@ -260,28 +214,27 @@ class GroupProvider extends ChangeNotifier {
     }
     
     try {
-      await _getFirestore()
-          .collection(AppConstants.groupsCollection)
-          .doc(groupId)
-          .update({
-        'name': name,
-        'description': description,
-        'supportedGames': supportedGames,
-        'isPublic': isPublic,
-        'updatedAt': DateTime.now().toIso8601String(),
-      });
+      final updatedGroup = await _groupService.updateGroup(
+        groupId: groupId,
+        name: name,
+        description: description,
+        supportedGames: enabledGames,
+        isPublic: isPublic,
+        imageUrl: imageUrl,
+      );
       
-      // Refresh current group
+      // Update the group in userGroups list
+      final index = _userGroups.indexWhere((g) => g.id == groupId);
+      if (index >= 0) {
+        _userGroups[index] = updatedGroup;
+      }
+      
+      // Update currentGroup if it's the same group
       if (_currentGroup?.id == groupId) {
-        await getGroup(groupId);
+        _currentGroup = updatedGroup;
       }
       
-      // Refresh user groups
-      final adminId = _currentGroup?.admins.isNotEmpty == true ? _currentGroup?.admins.first : null;
-      if (adminId != null) {
-        await loadUserGroups(adminId);
-      }
-      
+      notifyListeners();
       return true;
     } catch (e) {
       _error = e.toString();
@@ -313,12 +266,14 @@ class GroupProvider extends ChangeNotifier {
           id: groupId,
           name: _mockGroups[index].name,
           description: _mockGroups[index].description,
-          admins: _mockGroups[index].admins,
+          createdBy: _mockGroups[index].createdBy,
           members: [..._mockGroups[index].members, userId],
-          supportedGames: _mockGroups[index].supportedGames,
+          admins: _mockGroups[index].admins,
+          enabledGames: _mockGroups[index].enabledGames,
           isPublic: _mockGroups[index].isPublic,
           createdAt: _mockGroups[index].createdAt,
           updatedAt: DateTime.now(),
+          imageUrl: _mockGroups[index].imageUrl,
         );
         
         _mockGroups[index] = updatedGroup;
@@ -334,45 +289,22 @@ class GroupProvider extends ChangeNotifier {
     }
     
     try {
-      // Get the group
-      final docSnapshot = await _getFirestore()
-          .collection(AppConstants.groupsCollection)
-          .doc(groupId)
-          .get();
-      
-      if (!docSnapshot.exists) {
-        _error = 'Group not found';
-        return false;
-      }
-      
-      final group = GroupModel.fromMap(
-        docSnapshot.data() as Map<String, dynamic>,
-        docSnapshot.id,
-      );
-      
-      if (!group.isPublic) {
-        _error = 'This group is private';
-        return false;
-      }
-      
+      // Get the group first to check if user can join
+      final group = await _groupService.getGroup(groupId);
+
+      // Check if user is already a member
       if (group.members.contains(userId)) {
         _error = 'You are already a member of this group';
         return false;
       }
-      
-      // Add user to members
-      await _getFirestore()
-          .collection(AppConstants.groupsCollection)
-          .doc(groupId)
-          .update({
-        'members': FieldValue.arrayUnion([userId]),
-        'updatedAt': DateTime.now().toIso8601String(),
-      });
-      
-      // Refresh user groups
-      await loadUserGroups(userId);
-      
-      return true;
+
+      // Add member to group
+      final success = await _groupService.addMember(groupId, userId);
+      if (success) {
+        // Refresh user's groups
+        await loadUserGroups(userId);
+      }
+      return success;
     } catch (e) {
       _error = e.toString();
       debugPrint('Error joining group: $_error');
@@ -417,12 +349,14 @@ class GroupProvider extends ChangeNotifier {
             id: groupId,
             name: _mockGroups[index].name,
             description: _mockGroups[index].description,
-            admins: updatedAdmins,
+            createdBy: _mockGroups[index].createdBy,
             members: updatedMembers,
-            supportedGames: _mockGroups[index].supportedGames,
+            admins: updatedAdmins,
+            enabledGames: _mockGroups[index].enabledGames,
             isPublic: _mockGroups[index].isPublic,
             createdAt: _mockGroups[index].createdAt,
             updatedAt: DateTime.now(),
+            imageUrl: _mockGroups[index].imageUrl,
           );
           
           _mockGroups[index] = updatedGroup;
@@ -441,54 +375,29 @@ class GroupProvider extends ChangeNotifier {
     }
     
     try {
-      // Get the group
-      final docSnapshot = await _getFirestore()
-          .collection(AppConstants.groupsCollection)
-          .doc(groupId)
-          .get();
-      
-      if (!docSnapshot.exists) {
-        _error = 'Group not found';
-        return false;
-      }
-      
-      final group = GroupModel.fromMap(
-        docSnapshot.data() as Map<String, dynamic>,
-        docSnapshot.id,
-      );
-      
+      // Get the group first to check if user can leave
+      final group = await _groupService.getGroup(groupId);
+
+      // Check if user is a member
       if (!group.members.contains(userId)) {
         _error = 'You are not a member of this group';
         return false;
       }
-      
-      if (group.admins.contains(userId) && group.admins.length == 1 && group.members.length > 1) {
+
+      // Check if user is the only admin
+      if (group.admins.contains(userId) && group.admins.length == 1) {
         _error = 'Admin cannot leave the group. Transfer admin role first';
         return false;
       }
-      
-      if (group.members.length == 1) {
-        // Last member, delete the group
-        await _getFirestore()
-            .collection(AppConstants.groupsCollection)
-            .doc(groupId)
-            .delete();
-      } else {
-        // Remove user from members and admins
-        await _getFirestore()
-            .collection(AppConstants.groupsCollection)
-            .doc(groupId)
-            .update({
-          'members': FieldValue.arrayRemove([userId]),
-          'admins': FieldValue.arrayRemove([userId]),
-          'updatedAt': DateTime.now().toIso8601String(),
-        });
+
+      // Remove member from group
+      final success = await _groupService.removeMember(groupId, userId);
+      if (success) {
+        // Remove group from userGroups list
+        _userGroups.removeWhere((g) => g.id == groupId);
+        notifyListeners();
       }
-      
-      // Refresh user groups
-      await loadUserGroups(userId);
-      
-      return true;
+      return success;
     } catch (e) {
       _error = e.toString();
       debugPrint('Error leaving group: $_error');
@@ -524,41 +433,8 @@ class GroupProvider extends ChangeNotifier {
     }
     
     try {
-      QuerySnapshot querySnapshot;
-      
-      if (query.isEmpty) {
-        // Get all public groups
-        querySnapshot = await _getFirestore()
-            .collection(AppConstants.groupsCollection)
-            .where('isPublic', isEqualTo: true)
-            .limit(20)
-            .get();
-      } else {
-        // Get public groups that match the query
-        // Note: This is a simple implementation and might not be efficient for large datasets
-        // For production, consider using a search service like Algolia
-        querySnapshot = await _getFirestore()
-            .collection(AppConstants.groupsCollection)
-            .where('isPublic', isEqualTo: true)
-            .get();
-        
-        final allGroups = querySnapshot.docs
-            .map((doc) => GroupModel.fromMap(doc.data() as Map<String, dynamic>, doc.id))
-            .toList();
-        
-        final lowercaseQuery = query.toLowerCase();
-        _searchResults = allGroups.where((group) => 
-          group.name.toLowerCase().contains(lowercaseQuery) || 
-          group.description.toLowerCase().contains(lowercaseQuery)
-        ).toList();
-        
-        _setLoading(false);
-        return;
-      }
-      
-      _searchResults = querySnapshot.docs
-          .map((doc) => GroupModel.fromMap(doc.data() as Map<String, dynamic>, doc.id))
-          .toList();
+      _searchResults = await _groupService.searchGroups(query);
+      notifyListeners();
     } catch (e) {
       _error = e.toString();
       debugPrint('Error searching groups: $_error');
@@ -571,5 +447,148 @@ class GroupProvider extends ChangeNotifier {
   void _setLoading(bool value) {
     _isLoading = value;
     notifyListeners();
+  }
+
+  // Get user groups
+  Future<List<GroupModel>> getUserGroups([String? userId]) async {
+    if (FirebaseService.isMockMode) {
+      // Return the cached groups if available
+      if (_userGroups.isNotEmpty) {
+        return _userGroups;
+      }
+      // Otherwise, load them from the service
+      final groups = await _groupService.getUserGroups(userId ?? 'mock-user-id');
+      _userGroups = groups;
+      return groups;
+    }
+
+    try {
+      final groups = await _groupService.getUserGroups(userId!);
+      _userGroups = groups;
+      return groups;
+    } catch (e) {
+      _error = e.toString();
+      debugPrint('Error getting user groups: $_error');
+      return [];
+    }
+  }
+
+  Future<List<UserModel>> getGroupMembers(String groupId) async {
+    _setLoading(true);
+    _error = null;
+
+    if (FirebaseService.isMockMode) {
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      // Mock user data
+      final mockUserData = {
+        'mock-user-id': UserModel(
+          id: 'mock-user-id',
+          email: 'user@example.com',
+          username: 'You',
+          photoUrl: null,
+          createdAt: DateTime.now(),
+        ),
+        'user-alice': UserModel(
+          id: 'user-alice',
+          email: 'alice@example.com',
+          username: 'Alice',
+          photoUrl: 'https://i.pravatar.cc/150?u=alice',
+          createdAt: DateTime.now(),
+        ),
+        'user-bob': UserModel(
+          id: 'user-bob',
+          email: 'bob@example.com',
+          username: 'Bob',
+          photoUrl: 'https://i.pravatar.cc/150?u=bob',
+          createdAt: DateTime.now(),
+        ),
+        'user-charlie': UserModel(
+          id: 'user-charlie',
+          email: 'charlie@example.com',
+          username: 'Charlie',
+          photoUrl: 'https://i.pravatar.cc/150?u=charlie',
+          createdAt: DateTime.now(),
+        ),
+        'user-diana': UserModel(
+          id: 'user-diana',
+          email: 'diana@example.com',
+          username: 'Diana',
+          photoUrl: 'https://i.pravatar.cc/150?u=diana',
+          createdAt: DateTime.now(),
+        ),
+        'user-evan': UserModel(
+          id: 'user-evan',
+          email: 'evan@example.com',
+          username: 'Evan',
+          photoUrl: 'https://i.pravatar.cc/150?u=evan',
+          createdAt: DateTime.now(),
+        ),
+      };
+
+      final group = _mockGroups.firstWhere(
+        (g) => g.id == groupId,
+        orElse: () => throw Exception('Group not found'),
+      );
+
+      return group.members
+          .map((memberId) => mockUserData[memberId]!)
+          .toList();
+    }
+
+    try {
+      return await _groupService.getGroupMembers(groupId);
+    } catch (e) {
+      _error = e.toString();
+      debugPrint('Error getting group members: $_error');
+      return [];
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  Future<bool> addAdmin(String groupId, String userId) async {
+    _setLoading(true);
+    _error = null;
+
+    try {
+      return await _groupService.addAdmin(groupId, userId);
+    } catch (e) {
+      _error = e.toString();
+      debugPrint('Error adding admin: $_error');
+      return false;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  Future<bool> removeAdmin(String groupId, String userId) async {
+    _setLoading(true);
+    _error = null;
+
+    try {
+      return await _groupService.removeAdmin(groupId, userId);
+    } catch (e) {
+      _error = e.toString();
+      debugPrint('Error removing admin: $_error');
+      return false;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  Future<bool> removeMember(String groupId, String userId) async {
+    _setLoading(true);
+    _error = null;
+
+    try {
+      return await _groupService.removeMember(groupId, userId);
+    } catch (e) {
+      _error = e.toString();
+      debugPrint('Error removing member: $_error');
+      return false;
+    } finally {
+      _setLoading(false);
+    }
   }
 } 

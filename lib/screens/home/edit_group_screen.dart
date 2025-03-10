@@ -31,7 +31,7 @@ class _EditGroupScreenState extends State<EditGroupScreen> {
     _nameController = TextEditingController(text: widget.group.name);
     _descriptionController = TextEditingController(text: widget.group.description);
     _isPublic = widget.group.isPublic;
-    _selectedGames = List.from(widget.group.supportedGames);
+    _selectedGames = List.from(widget.group.enabledGames);
     
     // Load all games
     _loadGames();
@@ -54,7 +54,12 @@ class _EditGroupScreenState extends State<EditGroupScreen> {
     try {
       await gameStatusProvider.loadAllGames();
     } catch (e) {
-      // Handle error
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('An error occurred: \\${e.toString()}'),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
     } finally {
       setState(() {
         _isLoading = false;
@@ -76,7 +81,7 @@ class _EditGroupScreenState extends State<EditGroupScreen> {
         groupId: widget.group.id,
         name: _nameController.text.trim(),
         description: _descriptionController.text.trim(),
-        supportedGames: _selectedGames,
+        enabledGames: _selectedGames,
         isPublic: _isPublic,
       );
       
@@ -94,17 +99,15 @@ class _EditGroupScreenState extends State<EditGroupScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: ${e.toString()}'),
+            content: Text('An error occurred: \\${e.toString()}'),
             backgroundColor: Theme.of(context).colorScheme.error,
           ),
         );
       }
     } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      setState(() {
+        _isLoading = false;
+      });
     }
   }
 

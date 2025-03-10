@@ -11,7 +11,15 @@ class FirebaseService {
   // Initialize Firebase
   static Future<void> initialize() async {
     try {
-      await Firebase.initializeApp();
+      if (const bool.fromEnvironment('MOCK_MODE', defaultValue: true)) {
+        _mockMode = true;
+        debugPrint('Running in mock mode with limited features');
+        return;
+      }
+      
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
       debugPrint('Firebase initialized successfully');
     } catch (e) {
       _mockMode = true;

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../models/group_model.dart';
 import '../../models/user_model.dart';
 import '../../models/game_model.dart';
+import '../../models/game_status_model.dart';
 import '../../providers/user_provider.dart';
 import '../../providers/group_provider.dart';
 import '../../providers/game_status_provider.dart';
@@ -20,21 +21,18 @@ class GroupDetailScreen extends StatefulWidget {
   State<GroupDetailScreen> createState() => _GroupDetailScreenState();
 }
 
-class _GroupDetailScreenState extends State<GroupDetailScreen> with SingleTickerProviderStateMixin {
-  late TabController _tabController;
+class _GroupDetailScreenState extends State<GroupDetailScreen> {
   bool _isLoading = false;
+  String? _selectedGameId;
+  Map<String, GameStatusModel?> _memberStatuses = {};
+  List<UserModel> _members = [];
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
-    _loadGroupData();
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadGroupData();
+    });
   }
 
   Future<void> _loadGroupData() async {
@@ -45,12 +43,56 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> with SingleTicker
     try {
       final groupProvider = Provider.of<GroupProvider>(context, listen: false);
       await groupProvider.getGroup(widget.groupId);
+      
+      // Load members
+      _members = await groupProvider.getGroupMembers(widget.groupId);
+      
+      // Load member statuses if a game is selected
+      if (_selectedGameId != null) {
+        await _loadMemberStatuses();
+      }
     } catch (e) {
-      // Handle error
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: ${e.toString()}'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _loadMemberStatuses() async {
+    if (_selectedGameId == null) return;
+
+    final groupProvider = Provider.of<GroupProvider>(context, listen: false);
+    final gameStatusProvider = Provider.of<GameStatusProvider>(context, listen: false);
+    final group = groupProvider.currentGroup;
+    
+    if (group == null) return;
+
+    setState(() {
+      _memberStatuses = {};
+    });
+
+    for (final memberId in group.members) {
+      try {
+        final status = await gameStatusProvider.getGameStatus(memberId, _selectedGameId!);
+        if (mounted) {
+          setState(() {
+            _memberStatuses[memberId] = status;
+          });
+        }
+      } catch (e) {
+        debugPrint('Error loading status for member \\$memberId: \\${e.toString()}');
+      }
     }
   }
 
@@ -68,7 +110,6 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> with SingleTicker
 
     if (userProvider.user == null) return;
 
-    // Show confirmation dialog
     final bool? confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -97,7 +138,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> with SingleTicker
       final success = await groupProvider.leaveGroup(group.id, userProvider.user!.id);
 
       if (success && mounted) {
-        Navigator.of(context).pop(); // Go back to groups list
+        Navigator.of(context).pop();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('You have left ${group.name}'),
@@ -116,7 +157,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> with SingleTicker
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: ${e.toString()}'),
+            content: Text('Error: \\${e.toString()}'),
             backgroundColor: Theme.of(context).colorScheme.error,
           ),
         );
@@ -135,8 +176,9 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> with SingleTicker
     final groupProvider = Provider.of<GroupProvider>(context);
     final userProvider = Provider.of<UserProvider>(context);
     final gameStatusProvider = Provider.of<GameStatusProvider>(context);
+    final group = groupProvider.currentGroup;
 
-    if (_isLoading) {
+    if (_isLoading || group == null) {
       return Scaffold(
         appBar: AppBar(
           title: const Text('Group Details'),
@@ -147,22 +189,9 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> with SingleTicker
       );
     }
 
-    final GroupModel? group = groupProvider.currentGroup;
-
-    if (group == null) {
-      return Scaffold(
-        appBar: AppBar(
-          title: const Text('Group Details'),
-        ),
-        body: const Center(
-          child: Text('Group not found'),
-        ),
-      );
-    }
-
     final bool isAdmin = group.admins.contains(userProvider.user?.id);
     final List<GameModel> groupGames = gameStatusProvider.allGames
-        .where((game) => group.supportedGames.contains(game.id))
+        .where((game) => group.enabledGames.contains(game.id))
         .toList();
 
     return Scaffold(
@@ -179,259 +208,398 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> with SingleTicker
             onPressed: () => _leaveGroup(context, group),
           ),
         ],
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: 'Info'),
-            Tab(text: 'Members'),
-            Tab(text: 'Games'),
+      ),
+      body: Column(
+        children: [
+          // Game filter dropdown
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: DropdownButtonFormField<String?>(
+              value: _selectedGameId,
+              decoration: const InputDecoration(
+                labelText: 'Filter by Game',
+                border: OutlineInputBorder(),
+              ),
+              items: [
+                const DropdownMenuItem(
+                  value: null,
+                  child: Text('All Games'),
+                ),
+                ...groupGames.map((game) => DropdownMenuItem(
+                  value: game.id,
+                  child: Text(game.name),
+                )),
+              ],
+              onChanged: (value) {
+                setState(() {
+                  _selectedGameId = value;
+                });
+                _loadMemberStatuses();
+              },
+            ),
+          ),
+
+          // Members grid
+          Expanded(
+            child: _members.isEmpty && !_isLoading
+                ? const Center(
+                    child: Text('No members found'),
+                  )
+                : GridView.builder(
+                    padding: const EdgeInsets.all(16.0),
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2,
+                      childAspectRatio: 1,
+                      crossAxisSpacing: 16,
+                      mainAxisSpacing: 16,
+                    ),
+                    itemCount: _members.length,
+                    itemBuilder: (context, index) {
+                      final member = _members[index];
+                      final bool isMemberAdmin = group.admins.contains(member.id);
+                      final GameStatusModel? memberStatus = _memberStatuses[member.id];
+                      final bool isDownToPlay = memberStatus?.isDown ?? false;
+                      final bool isCurrentUser = userProvider.user?.id == member.id;
+
+                      return Card(
+                        elevation: 2,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: isDownToPlay 
+                            ? BorderSide(
+                                color: Theme.of(context).colorScheme.primary,
+                                width: 2,
+                              )
+                            : BorderSide.none,
+                        ),
+                        child: InkWell(
+                          onTap: () {
+                            if (isCurrentUser) {
+                              _showCurrentUserStatusOptions(context, member);
+                            } else if (isAdmin && !isCurrentUser) {
+                              _showMemberActions(context, member, isMemberAdmin);
+                            }
+                          },
+                          borderRadius: BorderRadius.circular(12),
+                          child: Stack(
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.all(16.0),
+                                child: LayoutBuilder(
+                                  builder: (context, constraints) {
+                                    final double avatarSize = constraints.maxWidth * 0.5;
+                                    return Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        // User avatar
+                                        CircleAvatar(
+                                          radius: avatarSize / 2,
+                                          backgroundColor: Theme.of(context).colorScheme.primary,
+                                          child: member.photoUrl != null
+                                              ? ClipOval(
+                                                  child: Image.network(
+                                                    member.photoUrl!,
+                                                    width: avatarSize,
+                                                    height: avatarSize,
+                                                    fit: BoxFit.cover,
+                                                  ),
+                                                )
+                                              : Text(
+                                                  member.username[0].toUpperCase(),
+                                                  style: TextStyle(
+                                                    fontSize: avatarSize * 0.4,
+                                                    color: Colors.white,
+                                                  ),
+                                                ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        
+                                        // Username
+                                        Text(
+                                          member.username,
+                                          style: const TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                          textAlign: TextAlign.center,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        
+                                        if (isMemberAdmin)
+                                          Text(
+                                            'Admin',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: Theme.of(context).colorScheme.primary,
+                                            ),
+                                          ),
+
+                                        // Show edit hint for current user
+                                        if (isCurrentUser)
+                                          Text(
+                                            'Tap to edit status',
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              color: Theme.of(context).colorScheme.primary,
+                                              fontStyle: FontStyle.italic,
+                                            ),
+                                          ),
+                                      ],
+                                    );
+                                  },
+                                ),
+                              ),
+                              
+                              // Status indicator
+                              if (_selectedGameId != null)
+                                Positioned(
+                                  top: 8,
+                                  right: 8,
+                                  child: Container(
+                                    width: 16,
+                                    height: 16,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: isDownToPlay
+                                          ? Theme.of(context).colorScheme.primary
+                                          : Colors.grey,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showMemberActions(BuildContext context, UserModel member, bool isMemberAdmin) {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text(member.username),
+              subtitle: Text(member.email),
+            ),
+            const Divider(),
+            if (!isMemberAdmin)
+              ListTile(
+                leading: const Icon(Icons.admin_panel_settings),
+                title: const Text('Make Admin'),
+                onTap: () async {
+                  Navigator.pop(context);
+                  final groupProvider = Provider.of<GroupProvider>(context, listen: false);
+                  await groupProvider.addAdmin(widget.groupId, member.id);
+                  _loadGroupData();
+                },
+              )
+            else
+              ListTile(
+                leading: const Icon(Icons.remove_moderator),
+                title: const Text('Remove Admin'),
+                onTap: () async {
+                  Navigator.pop(context);
+                  final groupProvider = Provider.of<GroupProvider>(context, listen: false);
+                  await groupProvider.removeAdmin(widget.groupId, member.id);
+                  _loadGroupData();
+                },
+              ),
+            ListTile(
+              leading: const Icon(Icons.person_remove),
+              title: const Text('Remove from Group'),
+              onTap: () async {
+                Navigator.pop(context);
+                final groupProvider = Provider.of<GroupProvider>(context, listen: false);
+                await groupProvider.removeMember(widget.groupId, member.id);
+                _loadGroupData();
+              },
+            ),
           ],
         ),
       ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          // Info tab
-          _buildInfoTab(context, group),
-          
-          // Members tab
-          FutureBuilder<List<UserModel>>(
-            future: _fetchGroupMembers(group),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              
-              if (snapshot.hasError) {
-                return Center(child: Text('Error: ${snapshot.error}'));
-              }
-              
-              final List<UserModel> members = snapshot.data ?? [];
-              return _buildMembersTab(context, group, members, isAdmin);
-            }
-          ),
-          
-          // Games tab
-          _buildGamesTab(context, groupGames),
-        ],
-      ),
     );
   }
 
-  Widget _buildInfoTab(BuildContext context, GroupModel group) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Group description
-          const Text(
-            'Description',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(group.description),
-          const SizedBox(height: 24),
-          
-          // Group details
-          const Text(
-            'Details',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 8),
-          _buildDetailItem(context, Icons.people, '${group.members.length} members'),
-          const SizedBox(height: 8),
-          _buildDetailItem(
-            context, 
-            Icons.sports_esports, 
-            '${group.supportedGames.length} supported games'
-          ),
-          const SizedBox(height: 8),
-          _buildDetailItem(
-            context, 
-            group.isPublic ? Icons.public : Icons.lock, 
-            group.isPublic ? 'Public group' : 'Private group'
-          ),
-          const SizedBox(height: 8),
-          _buildDetailItem(
-            context, 
-            Icons.calendar_today, 
-            'Created on ${_formatDate(group.createdAt)}'
-          ),
-        ],
-      ),
-    );
-  }
+  void _showCurrentUserStatusOptions(BuildContext context, UserModel user) {
+    final group = Provider.of<GroupProvider>(context, listen: false).currentGroup;
+    if (group == null) return;
 
-  Future<List<UserModel>> _fetchGroupMembers(GroupModel group) async {
-    // This is a placeholder. In a real app, you would fetch the user data for each member ID
-    // For now, we'll just create dummy user objects
-    await Future.delayed(const Duration(milliseconds: 500)); // Simulate network delay
-    
-    return group.members.map((memberId) {
-      // Check if this is the current user
-      if (Provider.of<UserProvider>(context, listen: false).user?.id == memberId) {
-        return Provider.of<UserProvider>(context, listen: false).user!;
-      }
-      
-      // Otherwise create a placeholder user
-      return UserModel(
-        id: memberId,
-        email: 'user_$memberId@example.com',
-        username: 'User $memberId',
-        createdAt: DateTime.now(),
-      );
-    }).toList();
-  }
+    final gameStatusProvider = Provider.of<GameStatusProvider>(context, listen: false);
+    final enabledGames = gameStatusProvider.allGames
+        .where((game) => group.enabledGames.contains(game.id))
+        .toList();
 
-  Widget _buildMembersTab(BuildContext context, GroupModel group, List<UserModel> members, bool isAdmin) {
-    return ListView.builder(
-      itemCount: members.length,
-      itemBuilder: (context, index) {
-        final member = members[index];
-        final bool isMemberAdmin = group.admins.contains(member.id);
-        final bool isCurrentUser = Provider.of<UserProvider>(context).user?.id == member.id;
-        
-        return ListTile(
-          leading: CircleAvatar(
-            backgroundColor: Theme.of(context).colorScheme.primary,
-            child: Text(
-              member.username.isNotEmpty ? member.username[0].toUpperCase() : '?',
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onPrimary,
-              ),
-            ),
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+            left: 16,
+            right: 16,
+            top: 16,
           ),
-          title: Text(
-            member.username,
-            style: TextStyle(
-              fontWeight: isMemberAdmin ? FontWeight.bold : FontWeight.normal,
-            ),
-          ),
-          subtitle: Text(
-            isMemberAdmin ? 'Admin' : 'Member',
-            style: TextStyle(
-              color: isMemberAdmin 
-                ? Theme.of(context).colorScheme.primary 
-                : Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-            ),
-          ),
-          trailing: isAdmin && !isCurrentUser
-              ? PopupMenuButton<String>(
-                  onSelected: (value) async {
-                    // These actions would need to be implemented in the GroupProvider
-                    if (value == 'make_admin') {
-                      // Implement make admin functionality
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Admin functionality not implemented yet')),
-                      );
-                    } else if (value == 'remove_admin') {
-                      // Implement remove admin functionality
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Admin functionality not implemented yet')),
-                      );
-                    }
-                  },
-                  itemBuilder: (context) => [
-                    if (!isMemberAdmin)
-                      const PopupMenuItem(
-                        value: 'make_admin',
-                        child: Text('Make Admin'),
-                      ),
-                    if (isMemberAdmin)
-                      const PopupMenuItem(
-                        value: 'remove_admin',
-                        child: Text('Remove Admin'),
-                      ),
-                  ],
-                )
-              : null,
-        );
-      },
-    );
-  }
-
-  Widget _buildGamesTab(BuildContext context, List<GameModel> games) {
-    if (games.isEmpty) {
-      return const Center(
-        child: Text('No games added to this group'),
-      );
-    }
-    
-    return ListView.builder(
-      padding: const EdgeInsets.all(16.0),
-      itemCount: games.length,
-      itemBuilder: (context, index) {
-        final game = games[index];
-        
-        return Card(
-          margin: const EdgeInsets.only(bottom: 16),
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
+          child: SingleChildScrollView(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  game.name,
+                  'Game Status',
                   style: const TextStyle(
-                    fontSize: 18,
+                    fontSize: 20,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  'Players: ${game.minPlayers}${game.maxPlayers != null ? ' - ${game.maxPlayers}' : '+'}',
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
-                  ),
+                const SizedBox(height: 24),
+
+                // List of enabled games with status toggles
+                ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: enabledGames.length,
+                  itemBuilder: (context, index) {
+                    final game = enabledGames[index];
+                    return FutureBuilder<GameStatusModel?>(
+                      future: gameStatusProvider.getGameStatus(user.id, game.id),
+                      builder: (context, snapshot) {
+                        if (snapshot.connectionState == ConnectionState.waiting) {
+                          return const Center(child: CircularProgressIndicator());
+                        }
+
+                        final status = snapshot.data;
+                        final isDown = status?.isDown ?? false;
+                        final downForGroups = status?.downForGroups ?? [];
+                        final isDownForThisGroup = isDown && downForGroups.contains(group.id);
+
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 16),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.05),
+                                blurRadius: 10,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: () async {
+                                List<String> newDownForGroups = List.from(downForGroups);
+                                if (!isDownForThisGroup) {
+                                  if (!newDownForGroups.contains(group.id)) {
+                                    newDownForGroups.add(group.id);
+                                  }
+                                } else {
+                                  newDownForGroups.remove(group.id);
+                                }
+
+                                final success = await gameStatusProvider.setGameStatus(
+                                  userId: user.id,
+                                  gameId: game.id,
+                                  isDown: newDownForGroups.isNotEmpty,
+                                  downForGroups: newDownForGroups,
+                                );
+
+                                if (success && mounted) {
+                                  // Refresh the status in the modal
+                                  setModalState(() {});
+                                  // Refresh the member statuses in the main screen
+                                  setState(() {
+                                    _memberStatuses[user.id] = null; // Clear the cache to force refresh
+                                  });
+                                  if (_selectedGameId == game.id) {
+                                    _loadMemberStatuses();
+                                  }
+                                }
+                              },
+                              borderRadius: BorderRadius.circular(12),
+                              child: Padding(
+                                padding: const EdgeInsets.all(16.0),
+                                child: Row(
+                                  children: [
+                                    // Game icon/image
+                                    Container(
+                                      width: 40,
+                                      height: 40,
+                                      decoration: BoxDecoration(
+                                        color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: game.imageUrl != null
+                                          ? ClipRRect(
+                                              borderRadius: BorderRadius.circular(8),
+                                              child: Image.network(
+                                                game.imageUrl!,
+                                                fit: BoxFit.cover,
+                                              ),
+                                            )
+                                          : Icon(
+                                              Icons.sports_esports,
+                                              color: Theme.of(context).colorScheme.primary,
+                                            ),
+                                    ),
+                                    const SizedBox(width: 16),
+                                    
+                                    // Game name
+                                    Expanded(
+                                      child: Text(
+                                        game.name,
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w500,
+                                          color: Theme.of(context).colorScheme.onSurface,
+                                        ),
+                                      ),
+                                    ),
+                                    
+                                    // Status indicator
+                                    Container(
+                                      width: 24,
+                                      height: 24,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: isDownForThisGroup
+                                            ? Theme.of(context).colorScheme.primary
+                                            : Colors.grey.withOpacity(0.3),
+                                      ),
+                                      child: Icon(
+                                        Icons.check,
+                                        size: 16,
+                                        color: isDownForThisGroup ? Colors.white : Colors.transparent,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  },
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  'Platforms: ${game.platforms.join(', ')}',
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
-                  ),
-                ),
+
+                const SizedBox(height: 16),
               ],
             ),
           ),
-        );
-      },
-    );
-  }
-
-  Widget _buildDetailItem(BuildContext context, IconData icon, String text) {
-    return Row(
-      children: [
-        Icon(
-          icon,
-          size: 20,
-          color: Theme.of(context).colorScheme.primary,
         ),
-        const SizedBox(width: 8),
-        Text(text),
-      ],
+      ),
     );
-  }
-
-  String _formatDate(DateTime date) {
-    final now = DateTime.now();
-    final difference = now.difference(date);
-    
-    if (difference.inDays < 1) {
-      return 'Today';
-    } else if (difference.inDays < 2) {
-      return 'Yesterday';
-    } else if (difference.inDays < 7) {
-      return '${difference.inDays} days ago';
-    } else {
-      return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
-    }
   }
 } 

@@ -62,7 +62,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: ${e.toString()}'),
+            content: Text('Error: \\${e.toString()}'),
             backgroundColor: Theme.of(context).colorScheme.error,
           ),
         );

@@ -39,7 +39,12 @@ class _GroupsTabState extends State<GroupsTab> {
       final groupProvider = Provider.of<GroupProvider>(context, listen: false);
       await groupProvider.loadUserGroups(userProvider.user!.id);
     } catch (e) {
-      // Handle error
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('An error occurred: \\${e.toString()}'),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
     } finally {
       setState(() {
         _isLoading = false;

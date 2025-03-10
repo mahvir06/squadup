@@ -90,7 +90,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
         name: _nameController.text.trim(),
         description: _descriptionController.text.trim(),
         adminId: userProvider.user!.id,
-        supportedGames: _selectedGames,
+        enabledGames: _selectedGames,
         isPublic: _isPublic,
       );
 

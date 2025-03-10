@@ -36,7 +36,12 @@ class _StatusTabState extends State<StatusTab> {
       final gameStatusProvider = Provider.of<GameStatusProvider>(context, listen: false);
       await gameStatusProvider.loadAllGames();
     } catch (e) {
-      // Handle error
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('An error occurred: \\${e.toString()}'),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
     } finally {
       setState(() {
         _isLoading = false;

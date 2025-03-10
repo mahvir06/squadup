@@ -12,6 +12,7 @@ class GameStatusService {
     required String userId,
     required String gameId,
     required bool isDown,
+    required List<String> downForGroups,
     DateTime? availableUntil,
     String? note,
   }) async {
@@ -24,6 +25,7 @@ class GameStatusService {
         userId: userId,
         gameId: gameId,
         isDown: isDown,
+        downForGroups: downForGroups,
         availableUntil: availableUntil,
         note: note,
         createdAt: now,
@@ -77,10 +79,8 @@ class GameStatusService {
       }
       
       final doc = querySnapshot.docs.first;
-      return GameStatusModel.fromMap(
-        doc.data() as Map<String, dynamic>,
-        doc.id,
-      );
+      final data = doc.data() as Map<String, dynamic>;
+      return GameStatusModel.fromMap(data);
     } catch (e) {
       throw Exception('Error getting game status: ${e.toString()}');
     }
@@ -99,10 +99,8 @@ class GameStatusService {
         throw Exception('Group not found');
       }
       
-      final GroupModel group = GroupModel.fromMap(
-        groupDoc.data() as Map<String, dynamic>,
-        groupId,
-      );
+      final data = groupDoc.data() as Map<String, dynamic>;
+      final group = GroupModel.fromMap(data);
       
       // Get game statuses for this game
       final QuerySnapshot statusesSnapshot = await _firestore
@@ -128,7 +126,10 @@ class GameStatusService {
           .get();
       
       return usersSnapshot.docs
-          .map((doc) => UserModel.fromMap(doc.data() as Map<String, dynamic>, doc.id))
+          .map((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            return UserModel.fromMap(data, doc.id);
+          })
           .toList();
     } catch (e) {
       throw Exception('Error getting users down to play: ${e.toString()}');
@@ -174,10 +175,8 @@ class GameStatusService {
         throw Exception('Group not found');
       }
       
-      final GroupModel group = GroupModel.fromMap(
-        groupDoc.data() as Map<String, dynamic>,
-        groupId,
-      );
+      final data = groupDoc.data() as Map<String, dynamic>;
+      final group = GroupModel.fromMap(data);
       
       // Get the game
       final DocumentSnapshot gameDoc = await _firestore
@@ -223,10 +222,8 @@ class GameStatusService {
           .get();
       
       for (final doc in usersSnapshot.docs) {
-        final UserModel user = UserModel.fromMap(
-          doc.data() as Map<String, dynamic>,
-          doc.id,
-        );
+        final data = doc.data() as Map<String, dynamic>;
+        final user = UserModel.fromMap(data, doc.id);
         
         // Get all game statuses for this user
         final QuerySnapshot statusesSnapshot = await _firestore
@@ -236,10 +233,8 @@ class GameStatusService {
             .get();
         
         for (final statusDoc in statusesSnapshot.docs) {
-          final GameStatusModel status = GameStatusModel.fromMap(
-            statusDoc.data() as Map<String, dynamic>,
-            statusDoc.id,
-          );
+          final data = statusDoc.data() as Map<String, dynamic>;
+          final status = GameStatusModel.fromMap(data);
           
           // Check if status has expired
           if (status.availableUntil != null && status.availableUntil!.isBefore(now)) {

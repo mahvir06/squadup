@@ -74,7 +74,7 @@ class _ProfileTabState extends State<ProfileTab> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: ${e.toString()}'),
+            content: Text('Error: \\${e.toString()}'),
             backgroundColor: Theme.of(context).colorScheme.error,
           ),
         );
@@ -115,7 +115,7 @@ class _ProfileTabState extends State<ProfileTab> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: ${e.toString()}'),
+            content: Text('Error: \\${e.toString()}'),
             backgroundColor: Theme.of(context).colorScheme.error,
           ),
         );
