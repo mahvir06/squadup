@@ -136,11 +136,11 @@ class _GameStatusCardState extends State<GameStatusCard> {
                       return Container(
                         margin: const EdgeInsets.only(bottom: 16),
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: Theme.of(context).cardTheme.color ?? Theme.of(context).colorScheme.surface,
                           borderRadius: BorderRadius.circular(12),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withOpacity(0.05),
+                              color: Theme.of(context).shadowColor.withOpacity(0.1),
                               blurRadius: 10,
                               offset: const Offset(0, 2),
                             ),
@@ -246,6 +246,7 @@ class _GameStatusCardState extends State<GameStatusCard> {
   @override
   Widget build(BuildContext context) {
     final bool isDown = _downForGroups.isNotEmpty;
+    final theme = Theme.of(context);
     
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -260,7 +261,7 @@ class _GameStatusCardState extends State<GameStatusCard> {
                 width: 60,
                 height: 60,
                 decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                  color: theme.colorScheme.primary.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: widget.game.imageUrl != null
@@ -274,7 +275,7 @@ class _GameStatusCardState extends State<GameStatusCard> {
                     : Icon(
                         Icons.sports_esports,
                         size: 30,
-                        color: Theme.of(context).colorScheme.primary,
+                        color: theme.colorScheme.primary,
                       ),
               ),
               const SizedBox(width: 16),
@@ -286,9 +287,10 @@ class _GameStatusCardState extends State<GameStatusCard> {
                   children: [
                     Text(
                       widget.game.name,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
+                        color: theme.colorScheme.onSurface,
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -296,7 +298,7 @@ class _GameStatusCardState extends State<GameStatusCard> {
                       'Players: ${widget.game.minPlayers}${widget.game.maxPlayers != null ? ' - ${widget.game.maxPlayers}' : '+'} | ${widget.game.platforms.join(", ")}',
                       style: TextStyle(
                         fontSize: 12,
-                        color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                        color: theme.colorScheme.onSurface.withOpacity(0.7),
                       ),
                     ),
                     if (_downForGroups.isNotEmpty) ...[
@@ -316,7 +318,7 @@ class _GameStatusCardState extends State<GameStatusCard> {
                             style: TextStyle(
                               fontSize: 12,
                               fontStyle: FontStyle.italic,
-                              color: Theme.of(context).colorScheme.primary,
+                              color: theme.colorScheme.primary,
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -330,11 +332,12 @@ class _GameStatusCardState extends State<GameStatusCard> {
               
               // Status indicator
               _isLoading
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 24,
                       height: 24,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(theme.colorScheme.primary),
                       ),
                     )
                   : Container(
@@ -343,13 +346,13 @@ class _GameStatusCardState extends State<GameStatusCard> {
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         color: isDown
-                            ? Theme.of(context).colorScheme.primary
-                            : Colors.grey.withOpacity(0.3),
+                            ? theme.colorScheme.primary
+                            : theme.colorScheme.onSurface.withOpacity(0.1),
                       ),
                       child: Icon(
                         Icons.check,
                         size: 16,
-                        color: isDown ? Colors.white : Colors.transparent,
+                        color: isDown ? theme.colorScheme.onPrimary : Colors.transparent,
                       ),
                     ),
             ],

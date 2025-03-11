@@ -132,8 +132,9 @@ class GroupProvider extends ChangeNotifier {
       );
       
       _mockGroups.add(newGroup);
-      _userGroups.add(newGroup);
-      
+      GroupService.addMockGroup(newGroup);
+      _userGroups = [..._userGroups, newGroup];
+      notifyListeners();
       _setLoading(false);
       return true;
     }
@@ -148,7 +149,7 @@ class GroupProvider extends ChangeNotifier {
         imageUrl: imageUrl,
       );
       
-      _userGroups.add(group);
+      _userGroups = [..._userGroups, group];
       notifyListeners();
       return true;
     } catch (e) {

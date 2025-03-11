@@ -6,11 +6,19 @@ import 'firebase_service.dart';
 
 class GroupService {
   FirebaseFirestore? _firestore;
+  
+  // Static mock storage
+  static final List<GroupModel> _mockGroups = [];
 
   GroupService() {
     if (!FirebaseService.isMockMode) {
       _firestore = FirebaseFirestore.instance;
     }
+  }
+
+  // Add a method to add mock group
+  static void addMockGroup(GroupModel group) {
+    _mockGroups.add(group);
   }
 
   // Create a new group
@@ -119,7 +127,7 @@ class GroupService {
   Future<List<GroupModel>> getUserGroups(String userId) async {
     if (FirebaseService.isMockMode) {
       // Return mock groups
-      return [
+      final mockGroups = [
         GroupModel(
           id: 'group-1',
           name: 'Casual Gamers',
@@ -145,6 +153,11 @@ class GroupService {
           updatedAt: DateTime.now(),
         ),
       ];
+      
+      // Add any newly created groups from the mock storage
+      mockGroups.addAll(_mockGroups.where((group) => group.members.contains(userId)));
+      
+      return mockGroups;
     }
 
     try {

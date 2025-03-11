@@ -382,19 +382,44 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
   void _showMemberActions(BuildContext context, UserModel member, bool isMemberAdmin) {
     showModalBottomSheet(
       context: context,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (context) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              title: Text(member.username),
-              subtitle: Text(member.email),
+              title: Text(
+                member.username,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurface,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              subtitle: Text(
+                member.email,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                ),
+              ),
             ),
-            const Divider(),
+            Divider(
+              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.1),
+            ),
             if (!isMemberAdmin)
               ListTile(
-                leading: const Icon(Icons.admin_panel_settings),
-                title: const Text('Make Admin'),
+                leading: Icon(
+                  Icons.admin_panel_settings,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                title: Text(
+                  'Make Admin',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
+                ),
                 onTap: () async {
                   Navigator.pop(context);
                   final groupProvider = Provider.of<GroupProvider>(context, listen: false);
@@ -404,8 +429,16 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
               )
             else
               ListTile(
-                leading: const Icon(Icons.remove_moderator),
-                title: const Text('Remove Admin'),
+                leading: Icon(
+                  Icons.remove_moderator,
+                  color: Theme.of(context).colorScheme.error,
+                ),
+                title: Text(
+                  'Remove Admin',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
+                ),
                 onTap: () async {
                   Navigator.pop(context);
                   final groupProvider = Provider.of<GroupProvider>(context, listen: false);
@@ -414,8 +447,16 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
                 },
               ),
             ListTile(
-              leading: const Icon(Icons.person_remove),
-              title: const Text('Remove from Group'),
+              leading: Icon(
+                Icons.person_remove,
+                color: Theme.of(context).colorScheme.error,
+              ),
+              title: Text(
+                'Remove from Group',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
+              ),
               onTap: () async {
                 Navigator.pop(context);
                 final groupProvider = Provider.of<GroupProvider>(context, listen: false);
@@ -441,6 +482,10 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (context) => StatefulBuilder(
         builder: (context, setModalState) => Padding(
           padding: EdgeInsets.only(
@@ -456,9 +501,10 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
               children: [
                 Text(
                   'Game Status',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
+                    color: Theme.of(context).colorScheme.onSurface,
                   ),
                 ),
                 const SizedBox(height: 24),
@@ -485,11 +531,11 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
                         return Container(
                           margin: const EdgeInsets.only(bottom: 16),
                           decoration: BoxDecoration(
-                            color: Colors.white,
+                            color: Theme.of(context).cardTheme.color ?? Theme.of(context).colorScheme.surface,
                             borderRadius: BorderRadius.circular(12),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withOpacity(0.05),
+                                color: Theme.of(context).shadowColor.withOpacity(0.1),
                                 blurRadius: 10,
                                 offset: const Offset(0, 2),
                               ),
@@ -575,12 +621,14 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
                                         shape: BoxShape.circle,
                                         color: isDownForThisGroup
                                             ? Theme.of(context).colorScheme.primary
-                                            : Colors.grey.withOpacity(0.3),
+                                            : Theme.of(context).colorScheme.onSurface.withOpacity(0.1),
                                       ),
                                       child: Icon(
                                         Icons.check,
                                         size: 16,
-                                        color: isDownForThisGroup ? Colors.white : Colors.transparent,
+                                        color: isDownForThisGroup 
+                                            ? Theme.of(context).colorScheme.onPrimary 
+                                            : Colors.transparent,
                                       ),
                                     ),
                                   ],

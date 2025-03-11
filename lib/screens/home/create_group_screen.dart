@@ -95,6 +95,10 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
       );
 
       if (success && mounted) {
+        // Refresh the groups list before popping
+        await groupProvider.loadUserGroups(userProvider.user!.id);
+        
+        if (!mounted) return;
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
